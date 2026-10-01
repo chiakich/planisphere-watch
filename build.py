@@ -27,7 +27,7 @@ RAY_STEP = 6  # degrees between hairlines
 CRESCENT_GROOVE = True  # lighter band along the crescent's outer edge
 GRID = (66, 62, 55)
 AOD_DIM = 0.9
-PANEL = BLACK  # capsule panel colour; CHAR restores the reference charcoal
+PANEL = CHAR  # capsule panel colour; BLACK gives a pure black face
 
 FONT = "/System/Library/Fonts/Supplemental/Bodoni 72.ttc"
 BOOK, BOLD = 0, 2
@@ -52,6 +52,7 @@ CRESCENT_R = 68
 HOLE_R = 44
 HOLE_SHIFT = 18  # hole sits near the rim (6px wall) ...
 HOLE_DIR = 45  # ... under the top-right spade
+WINDOW_SHADOW = 18  # band px of inner shadow inside the window
 MAX_HAND_R = 106  # pointer sprites are squares centred on the pivot; keep them within the 212px width
 
 
@@ -102,7 +103,8 @@ def font(size: float, weight: int = BOOK) -> ImageFont.FreeTypeFont:
     return ImageFont.truetype(FONT, round(size * SS), index=weight)
 
 
-def text_sprite(text: str, size: float, cell=None, color=GOLD, weight=BOOK, tracking: float = 0) -> Image.Image:
+def text_sprite(text: str, size: float, cell=None, color=GOLD, weight=BOOK, tracking: float = 0,
+                align: str = "center") -> Image.Image:
     f = font(size, weight)
     probe = Image.new("L", (round(size * SS * (len(text) + 2)), round(size * SS * 2)))
     draw = ImageDraw.Draw(probe)
@@ -116,7 +118,8 @@ def text_sprite(text: str, size: float, cell=None, color=GOLD, weight=BOOK, trac
     w = cell[0] * SS if cell else ink.width + 2 * SS
     h = cell[1] * SS if cell else ink.height + 2 * SS
     mask = Image.new("L", (w, h))
-    mask.paste(ink, ((w - ink.width) // 2, (h - ink.height) // 2))
+    x = w - ink.width - SS if align == "right" else (w - ink.width) // 2
+    mask.paste(ink, (x, (h - ink.height) // 2))
     mask = mask.resize((w // SS, h // SS), Image.LANCZOS)
     out = Image.new("RGBA", mask.size, color + (0,))
     out.putalpha(mask)
@@ -251,18 +254,21 @@ def background() -> Image.Image:
     sparkle(pen, cx, cy, 7, GOLD, fill=GOLD, inner=0.38)
     dial(pen, cx, cy, GOLD)
     # Top info plate, and a star finial under the time
-    plate(pen, 106, 56, 164, 56)
-    pen.line([(70, 474), (142, 474)], GOLD, 0.6)
-    sparkle(pen, 106, 474, 6.5, GOLD, fill=GOLD, inner=0.25)
+    # Plate sits below the top arc, where the capsule is wide enough for one line
+    # Wider than the gold frame: side tips stop ~5px short of the screen edge (half-width ~101 here)
+    plate(pen, 106, 74, 200, 36, divider_x=101)
+    for y in (36, 474):  # star finials top and bottom
+        pen.line([(70, y), (142, y)], GOLD, 0.6)
+        sparkle(pen, 106, y, 6.5, GOLD, fill=GOLD, inner=0.25)
     return pen.done()
 
 
-def plate(pen: Pen, cx, cy, w, h, color=GOLD):
-    """Elongated hexagon label plate from the reference header."""
+def plate(pen: Pen, cx, cy, w, h, divider_x, color=GOLD):
+    """Elongated hexagon label plate from the reference header, with a divider between weekday and date."""
     pts = [(cx - w / 2, cy), (cx - w / 2 + h / 2, cy - h / 2), (cx + w / 2 - h / 2, cy - h / 2),
            (cx + w / 2, cy), (cx + w / 2 - h / 2, cy + h / 2), (cx - w / 2 + h / 2, cy + h / 2)]
     pen.poly(pts, fill=BLACK, outline=color, width=0.8)
-    pen.line([(cx - 22, cy - 1), (cx + 22, cy - 1)], color, 0.6)  # rule between weekday and date
+    pen.line([(divider_x, cy - h / 2 + 7), (divider_x, cy + h / 2 - 7)], color, 0.7)
 
 
 def spade_masks(size: int, c: float, ang: float) -> tuple[np.ndarray, np.ndarray]:
@@ -313,6 +319,13 @@ def crescent_sprite() -> Image.Image:
     body.img.alpha_composite(Image.fromarray(deco_a.astype(np.uint8), "RGBA"))
     a = np.asarray(body.img).astype(float)
     a[..., 3] *= 1 - np.asarray(hole).astype(float) / 255
+    # Inner shadow just inside the window, as if the crescent sits above the star chart
+    yy, xx = np.mgrid[: size * SS, : size * SS] / SS
+    depth = HOLE_R - np.hypot(xx - hx, yy - hy)
+    shade = np.where(depth > 0, np.clip(1 - depth / WINDOW_SHADOW, 0, 1) ** 0.8, 0) * 255
+    # The window was cut via alpha only, so its RGB is still navy: shadow pixels must be set to black
+    a[..., :3] *= (depth <= 0)[..., None]
+    a[..., 3] = np.maximum(a[..., 3], shade)
     body.img = Image.fromarray(a.astype(np.uint8), "RGBA")
     body.d = ImageDraw.Draw(body.img)
     body.circle(c, c, CRESCENT_R, GOLD, 0.9)
@@ -423,7 +436,7 @@ def build() -> None:
     dim = tuple(int(v * AOD_DIM) for v in GOLD)
     save(background(), "bg")
 
-    weekdays = [save(text_sprite(d, 17, (54, 20), weight=BOLD, tracking=2.2), f"wd-{d.lower()}")
+    weekdays = [save(text_sprite(d, 25, (64, 28), weight=BOLD, tracking=2.4, align="right"), f"wd-{d.lower()}")
                 for d in ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"]]
     date_digits = digits("d", 25, (15, 26))
     slash = save(text_sprite("/", 25, (10, 26)), "d-slash")
@@ -449,16 +462,16 @@ def build() -> None:
 
     normal = [
         image(0, 0, "bg"),
-        # Two-row plate centred on x=106: weekday (54px) above "10/01" (70px)
-        {"type": "widge_imagelist", "x": 79, "y": 33, "dataSrc": "2012", "imageList": weekdays,
+        # One-line plate, both 25px: weekday right-aligned to the divider (x=101), "10/01" after it, 13px either side
+        {"type": "widge_imagelist", "x": 28, "y": 60, "dataSrc": "2012", "imageList": weekdays,
          "imageIndexList": list(range(7))},
-        number(71, 57, "1012", date_digits, 2, "left"),
-        image(101, 57, slash),
-        number(111, 57, "1812", date_digits, 2, "left"),
-        image(24, 99, bat_icon),
-        number(53, 96, "0841", small, 3, "left", zero=False, unit=pct),
-        image(117, 98, step_icon),
-        number(188, 96, "0821", small, 5, "right", zero=False),
+        number(110, 61, "1012", date_digits, 2, "left"),
+        image(140, 61, slash),
+        number(150, 61, "1812", date_digits, 2, "left"),
+        image(24, 109, bat_icon),
+        number(53, 106, "0841", small, 3, "left", zero=False, unit=pct),
+        image(117, 108, step_icon),
+        number(188, 106, "0821", small, 5, "right", zero=False),
         *clock(time_digits, colon),
         pointer("crescent", crescent_sprite(), "1811", "simple", 60, 3600),
         pointer("hour", drawn_hand("hour"), "0811", "rotate", 24, 7200),
@@ -473,10 +486,10 @@ def build() -> None:
     aod_colon = save(text_sprite(":", 40, (10, 32), GOLD), "at-colon", aod=True)
     aod = [
         image(0, 0, "aod-bg"),
-        # "10/01" is 70px wide, centred on x=106
-        number(71, 45, "1012", aod_digits, 2, "left"),
-        image(101, 45, aod_slash),
-        number(111, 45, "1812", aod_digits, 2, "left"),
+        # "10/01" is 70px wide, centred on x=106, level with the normal face's plate
+        number(71, 61, "1012", aod_digits, 2, "left"),
+        image(101, 61, aod_slash),
+        number(111, 61, "1812", aod_digits, 2, "left"),
         *clock(aod_time, aod_colon),
         pointer("aod-hour", drawn_hand("hour", dim, BLACK), "0811", "rotate", 24, 7200, aod=True),
         pointer("aod-minute", drawn_hand("minute", dim, BLACK), "1011", "rotate", 60, 3600, aod=True),

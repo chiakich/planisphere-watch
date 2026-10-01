@@ -5,7 +5,7 @@ A planisphere-style watch face for the **Xiaomi Smart Band 11** (212×520), draw
 ![Normal and always-on faces](docs/preview.png)
 
 - A navy crescent with four spades sweeps once a minute as the seconds hand; its eccentric window reveals a real north-polar star map like a rotating planisphere.
-- Roman numeral ring, sparkle band and tick ring in flat hairline gold on black.
+- Roman numeral ring, sparkle band and tick ring in flat hairline gold on a charcoal capsule.
 - Weekday / date plate, battery and steps, and a digital time under the dial.
 - Separate always-on (AOD) face: full star field, numerals, hands, date and time on pure black.
 
