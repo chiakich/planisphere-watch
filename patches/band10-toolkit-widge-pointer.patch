@@ -1,0 +1,93 @@
+diff --git a/builder/native.ts b/builder/native.ts
+index 2ea04b1..ffc7c73 100644
+--- a/builder/native.ts
++++ b/builder/native.ts
+@@ -21,7 +21,7 @@ interface GmfDefinition {
+ }
+ 
+ interface GmfElement {
+-  type: 'element' | 'element_anim' | 'widge_dignum' | 'widge_imagelist' | 'widge_process'
++  type: 'element' | 'element_anim' | 'widge_dignum' | 'widge_imagelist' | 'widge_process' | 'widge_pointer'
+   x: number
+   y: number
+   image?: string
+@@ -34,6 +34,13 @@ interface GmfElement {
+   showZero?: boolean
+   animInterval?: number
+   animRepeat?: number
++  // widge_pointer: 'simple' (0x30) is used for seconds, 'rotate' (0x40) for hour/minute in Xiaomi faces
++  pointerStyle?: 'simple' | 'rotate'
++  pivotX?: number
++  pivotY?: number
++  maxValue?: number
++  startAngle?: number
++  endAngle?: number
+ }
+ 
+ interface BinaryResource {
+@@ -56,9 +63,10 @@ interface PreparedAnimation {
+ 
+ interface PreparedWidget {
+   source: GmfElement
+-  type: 'number' | 'image-list' | 'progress'
++  type: 'number' | 'image-list' | 'progress' | 'pointer'
+   listIndex?: number
+   singleIndex?: number
++  blankIndex?: number
+ }
+ 
+ interface PreparedFace {
+@@ -92,6 +100,7 @@ function imageListKey(names: string[]): string {
+ 
+ function widgetPropertySize(widget: PreparedWidget): number {
+   if (widget.type === 'image-list') return 16 + (widget.source.imageIndexList?.length ?? 0) * 4
++  if (widget.type === 'pointer') return widget.source.pointerStyle === 'rotate' ? 52 : 32
+   if (widget.type === 'progress') return 40
+   return 20
+ }
+@@ -150,6 +159,14 @@ async function prepareFace(elements: GmfElement[], imageDirectory: string, compr
+         listIndex: useList(element.imageList),
+         singleIndex: element.image ? useSingle(element.image) : undefined,
+       })
++    } else if (element.type === 'widge_pointer') {
++      if (!element.image) throw new Error('Pointer widget is missing its hand image')
++      widgets.push({
++        source: element,
++        type: 'pointer',
++        singleIndex: useSingle(element.image),
++        blankIndex: element.pointerStyle === 'rotate' && element.imageList?.[0] ? useSingle(element.imageList[0]) : undefined,
++      })
+     } else if (element.type === 'widge_imagelist') {
+       if (!element.imageList?.length) throw new Error('Image-list widget is missing images')
+       widgets.push({ source: element, type: 'image-list', listIndex: useList(element.imageList) })
+@@ -243,6 +260,30 @@ function makeWidgetProperty(widget: PreparedWidget): Uint8Array {
+     return property
+   }
+ 
++  if (widget.type === 'pointer') {
++    // Byte layout mirrors pointer records recovered from a Xiaomi-built Band 10 face
++    const rotate = source.pointerStyle === 'rotate'
++    const base = rotate ? 8 : 0
++    property[3] = rotate ? 0x40 : 0x30
++    if (rotate) {
++      writeU24LE(property, 8, widget.blankIndex ?? widget.singleIndex ?? 0)
++      property[11] = 2
++      property[16] = 2
++      writeU32LE(property, 36, 100)
++    } else {
++      property[6] = 0x10
++    }
++    const handOffset = rotate ? 40 : 8
++    writeU24LE(property, handOffset, widget.singleIndex ?? 0)
++    property[handOffset + 3] = 2
++    writeU16LE(property, base + 17, source.maxValue ?? 60)
++    writeU16LE(property, base + 20, source.pivotX ?? 0)
++    writeU16LE(property, base + 22, source.pivotY ?? 0)
++    writeU16LE(property, base + 24, source.startAngle ?? 0)
++    writeU16LE(property, base + 26, source.endAngle ?? 3600)
++    return property
++  }
++
+   if (widget.type === 'image-list') {
+     property[3] = 0x20
+     writeU24LE(property, 8, widget.listIndex ?? 0)
